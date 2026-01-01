@@ -1,0 +1,5 @@
+{
+  "name": "Horizontale Worp Simulator",
+  "description": "Een interactieve natuurkunde-simulatie van de horizontale worp met real-time vectorvisualisatie van snelheid en krachten.",
+  "requestFramePermissions": []
+}
