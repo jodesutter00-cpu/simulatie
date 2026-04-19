@@ -1,14 +1,14 @@
 
-import { G, PIXELS_PER_METER, GROUND_Y_OFFSET, BUILDING_WIDTH } from './constants';
+import { G, PIXELS_PER_METER, BUILDING_WIDTH, BASE_PADDING_BOTTOM } from './constants';
 import VectorArrow from './components/VectorArrow';
 import { GoogleGenAI } from "@google/genai";
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Point, StoredSimulationResult } from './types';
 
 const App: React.FC = () => {
   const [initialVelocity, setInitialVelocity] = useState(13.5);
   const [initialHeight, setInitialHeight] = useState(20);
-  const [mass, setMass] = useState(50);
+  const [mass, setMass] = useState(274);
   const [isPaused, setIsPaused] = useState(true);
   const [time, setTime] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
@@ -35,13 +35,24 @@ const App: React.FC = () => {
   const Fg = mass * G;
   const Fi_y = -mass * G; 
 
+  // DYNAMISCHE LAYOUT BEREKENINGEN
+  // De ruimte onder de groene lijn moet minstens zo groot zijn als de Fg vector (Fg/10) + marge
+  const dynamicGroundOffset = useMemo(() => {
+    const fgVectorLength = Fg / 10;
+    return Math.max(BASE_PADDING_BOTTOM, fgVectorLength + 50);
+  }, [Fg]);
+
+  const topPadding = 80; // Ruimte boven voor labels bij start
+  const trajectoryCanvasHeight = initialHeight * PIXELS_PER_METER;
+  const totalCanvasHeight = trajectoryCanvasHeight + dynamicGroundOffset + topPadding;
+
   const fetchExplanation = async () => {
     setIsLoadingExplanation(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Leg kort in het Nederlands uit wat er gebeurt bij een horizontale worp met een beginsnelheid van ${initialVelocity} m/s vanop een hoogte van ${initialHeight} meter met een massa van ${mass} kg.`,
+        contents: `Leg kort in het Nederlands uit wat er gebeurt bij een horizontale worp met een beginsnelheid van ${initialVelocity} m/s vanop een hoogte van ${initialHeight} meter met een massa van ${mass} kg. Focus op de krachten bij impact en de baan.`,
       });
       setGeminiExplanation(response.text || 'Geen uitleg beschikbaar.');
     } catch (error) {
@@ -50,6 +61,11 @@ const App: React.FC = () => {
       setIsLoadingExplanation(false);
     }
   };
+
+  const getScreenCoords = useCallback((p: Point) => ({
+    x: BUILDING_WIDTH + p.x * PIXELS_PER_METER,
+    y: totalCanvasHeight - (p.y * PIXELS_PER_METER) - dynamicGroundOffset
+  }), [totalCanvasHeight, dynamicGroundOffset]);
 
   const animate = useCallback((timestamp: number) => {
     if (lastTimeRef.current !== undefined && !isPaused && isRunning && !isLanded) {
@@ -130,14 +146,7 @@ const App: React.FC = () => {
     setGeminiExplanation('');
   };
 
-  const canvasHeight = (initialHeight + 10) * PIXELS_PER_METER;
-
-  const getScreenCoords = (p: Point, h: number) => ({
-    x: BUILDING_WIDTH + p.x * PIXELS_PER_METER,
-    y: h - (p.y * PIXELS_PER_METER) - GROUND_Y_OFFSET
-  });
-
-  const currentPos = getScreenCoords({ x: currentX, y: currentY }, canvasHeight);
+  const currentPos = getScreenCoords({ x: currentX, y: currentY });
 
   const generateActivePathPoints = () => {
     const points: string[] = [];
@@ -145,7 +154,7 @@ const App: React.FC = () => {
     for (let t = 0; t <= currentTime; t += step) {
       const x = initialVelocity * t;
       const y = initialHeight - 0.5 * G * t * t;
-      const screen = getScreenCoords({ x, y }, canvasHeight);
+      const screen = getScreenCoords({ x, y });
       points.push(`${screen.x},${screen.y}`);
     }
     points.push(`${currentPos.x},${currentPos.y}`);
@@ -155,8 +164,18 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 flex flex-col gap-6 font-sans antialiased text-slate-900">
       <header className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Horizontale Worp Simulator</h1>
-        <p className="text-slate-500 mt-1">Interactief laboratorium voor kinematica en dynamica.</p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Horizontale Worp Simulator</h1>
+            <p className="text-slate-500 mt-1">Interactieve analyse van kinematica en vectorkrachten.</p>
+          </div>
+          <div className="flex items-center gap-4 bg-slate-50 p-2 rounded-xl border border-slate-100">
+            <div className="px-4 py-2 bg-white rounded-lg shadow-sm border border-slate-200">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block">Canvas Hoogte</span>
+              <span className="text-sm font-black text-blue-600">{(totalCanvasHeight/PIXELS_PER_METER).toFixed(1)} m (virtueel)</span>
+            </div>
+          </div>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
@@ -252,7 +271,7 @@ const App: React.FC = () => {
 
         <main className="lg:col-span-3 flex flex-col gap-6">
           <div className="bg-slate-900 rounded-[2.5rem] shadow-2xl relative overflow-hidden border-[12px] border-slate-800" style={{ height: '620px' }}>
-            <svg width="100%" height="100%" className="bg-slate-950" viewBox={`0 0 1000 ${canvasHeight}`} preserveAspectRatio="xMinYMin meet">
+            <svg width="100%" height="100%" className="bg-slate-950" viewBox={`0 0 1000 ${totalCanvasHeight}`} preserveAspectRatio="xMinYMin meet">
               <defs>
                 <pattern id="grid" width={PIXELS_PER_METER * 5} height={PIXELS_PER_METER * 5} patternUnits="userSpaceOnUse">
                   <path d={`M ${PIXELS_PER_METER * 5} 0 L 0 0 0 ${PIXELS_PER_METER * 5}`} fill="none" stroke="#1e293b" strokeWidth="0.5"/>
@@ -267,7 +286,7 @@ const App: React.FC = () => {
               {/* Gebouw */}
               <rect
                 x={0}
-                y={canvasHeight - (initialHeight * PIXELS_PER_METER) - GROUND_Y_OFFSET}
+                y={totalCanvasHeight - (initialHeight * PIXELS_PER_METER) - dynamicGroundOffset}
                 width={BUILDING_WIDTH}
                 height={initialHeight * PIXELS_PER_METER}
                 fill="url(#buildingGradient)"
@@ -275,22 +294,22 @@ const App: React.FC = () => {
                 strokeWidth="1"
               />
 
-              {/* Grond */}
+              {/* Grond (Groene lijn) */}
               <line
-                x1="0" y1={canvasHeight - GROUND_Y_OFFSET} x2="1000" y2={canvasHeight - GROUND_Y_OFFSET}
+                x1="0" y1={totalCanvasHeight - dynamicGroundOffset} x2="1000" y2={totalCanvasHeight - dynamicGroundOffset}
                 stroke="#22c55e" strokeWidth="6" strokeLinecap="round"
               />
 
               {/* HISTORIEK (Ghosting) */}
               {pastResults.map((res, idx) => {
-                const fPos = getScreenCoords(res.finalPos, canvasHeight);
+                const fPos = getScreenCoords(res.finalPos);
                 const opacity = 0.3 - (idx * 0.08);
                 const p = res.initialParams;
                 return (
                   <g key={`ghost-${idx}`} opacity={opacity}>
                     <polyline
                       points={res.trajectory.map(p => {
-                        const s = getScreenCoords(p, canvasHeight);
+                        const s = getScreenCoords(p);
                         return `${s.x},${s.y}`;
                       }).join(' ')}
                       fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="5 5"
@@ -335,13 +354,13 @@ const App: React.FC = () => {
                   <VectorArrow startX={currentPos.x} startY={currentPos.y} vx={0} vy={-vy} color="#60a5fa" label={`vy: ${vy.toFixed(1)} m/s`} scale={4} labelOffset={1} />
                   <VectorArrow startX={currentPos.x} startY={currentPos.y} vx={vx} vy={-vy} color="#ffffff" label={`v_res: ${vResultant.toFixed(1)} m/s`} scale={4} labelOffset={2} />
                   <VectorArrow startX={currentPos.x} startY={currentPos.y} vx={0} vy={-Fg/10} color="#fca5a5" label={`Fg: ${Fg.toFixed(0)} N`} scale={1} labelOffset={-1} />
-                  {/* Fi_y is removed from here as per user request to only show it on impact */}
                 </g>
               )}
 
-              {/* Impact animatie */}
+              {/* Impact animatie en Normalkracht */}
               {isLanded && impactHappened && (
                 <g>
+                  {/* Normalkracht (Fi_y) wijst omhoog bij impact */}
                   <VectorArrow startX={currentPos.x} startY={currentPos.y} vx={0} vy={-Fi_y/10} color="#fdba74" label={`Fi_y: ${(-Fi_y).toFixed(0)} N`} scale={1} labelOffset={-2} />
                   <VectorArrow startX={currentPos.x} startY={currentPos.y} vx={0} vy={Fg/4} color="#ef4444" label={`Impact: ~${(Fg*5).toFixed(0)} N`} scale={1} labelOffset={-3} />
                   <circle cx={currentPos.x} cy={currentPos.y} r="28" fill="#ef4444" opacity="0.1" className="animate-ping" />
@@ -397,23 +416,23 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Historiek</h3>
-              <p className="text-slate-600 text-xs leading-relaxed">Vergelijk tot 3 trajecten. Beweeg over de ghosting worpen om de specifieke parameters bij de impact te zien.</p>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Aan de slag</h3>
+              <p className="text-slate-600 text-xs leading-relaxed">Stel de beginsnelheid, hoogte en massa in. Start de simulatie met de blauwe knop. De laatste simulatie blijven in grijs staan ter vergelijking tot je de historiek reset.</p>
             </div>
             <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Live Theorie</h3>
-              <p className="text-slate-600 text-xs leading-relaxed">Het kader rechtsonder rekent real-time mee met jouw schuifbalken voor de perfecte voorspelling.</p>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Dynamisch Bereik</h3>
+              <p className="text-slate-600 text-xs leading-relaxed">De ruimte onder de groene lijn past zich automatisch aan de massa aan, zodat krachtsvectoren altijd zichtbaar blijven.</p>
             </div>
             <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Vector Analyse</h3>
-              <p className="text-slate-600 text-xs leading-relaxed">De blauwe lijnen tonen snelheid, de rode lijnen tonen de krachten die inwerken op het object.</p>
+              <p className="text-slate-600 text-xs leading-relaxed">De blauwe lijnen tonen de snelheid ($v$), de rode lijnen tonen de zwaartekracht ($F_g$) en de impactkrachten bij landing.</p>
             </div>
           </div>
         </main>
       </div>
 
       <footer className="py-6 border-t border-slate-200 text-center text-slate-400 text-[10px] uppercase tracking-[0.3em] mt-auto">
-        Physica Simulator &bull; Horizontale Worp &bull; v3.1 Impact-Focused
+        Physica Simulator &bull; Horizontale Worp &bull; v3.2 Dynamisch Bereik
       </footer>
     </div>
   );
